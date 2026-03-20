@@ -1,0 +1,143 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION   = 'ap-south-1'
+        CLUSTER_NAME = 'mycluster.pythonapp.com'
+        TF_DIR       = 'terraform'
+        KUBECONFIG   = '/var/lib/jenkins/.kube/config'
+    }
+
+    stages {
+
+        stage('Terraform Init') {
+            steps {
+                dir("${TF_DIR}") {
+                    sh 'terraform init -reconfigure'
+                }
+            }
+        }
+
+        stage('Terraform Validate') {
+            steps {
+                dir("${TF_DIR}") {
+                    sh 'terraform validate'
+                }
+            }
+        }
+
+        stage('Terraform Apply') {
+            steps {
+                dir("${TF_DIR}") {
+                    sh 'terraform apply -auto-approve'
+                }
+            }
+        }
+
+        stage('Get Terraform Outputs') {
+            steps {
+                script {
+                    env.KOPS_STATE_STORE = "s3://" + sh(
+                        script: "cd ${TF_DIR} && terraform output -raw kops_bucket_name",
+                        returnStdout: true
+                    ).trim()
+
+                    env.VPC_ID = sh(
+                        script: "cd ${TF_DIR} && terraform output -raw vpc_id",
+                        returnStdout: true
+                    ).trim()
+
+                    env.SUBNETS = sh(
+                        script: "cd ${TF_DIR} && terraform output -raw private_subnet_ids",
+                        returnStdout: true
+                    ).trim()
+
+                    echo "KOPS_STATE_STORE: ${env.KOPS_STATE_STORE}"
+                    echo "VPC_ID: ${env.VPC_ID}"
+                    echo "SUBNETS: ${env.SUBNETS}"
+                }
+            }
+        }
+
+        stage('kOps — Create or Update Cluster') {
+            steps {
+                script {
+                    def clusterExists = sh(
+                        script: "kops get cluster --name=${CLUSTER_NAME} --state=${env.KOPS_STATE_STORE} > /dev/null 2>&1 && echo 'yes' || echo 'no'",
+                        returnStdout: true
+                    ).trim()
+
+                    if (clusterExists == 'yes') {
+                        echo "Cluster exists — running update..."
+                        sh """
+                            kops update cluster \\
+                              --name=${CLUSTER_NAME} \\
+                              --state=${env.KOPS_STATE_STORE} \\
+                              --yes
+
+                            kops rolling-update cluster \\
+                              --name=${CLUSTER_NAME} \\
+                              --state=${env.KOPS_STATE_STORE} \\
+                              --yes
+                        """
+                    } else {
+                        echo "Cluster not found — creating..."
+                        sh """
+                            kops create cluster \\
+                              --name=${CLUSTER_NAME} \\
+                              --state=${env.KOPS_STATE_STORE} \\
+                              --vpc=${env.VPC_ID} \\
+                              --subnets=${env.SUBNETS} \\
+                              --master-size=t3.small \\
+                              --node-size=t3.small \\
+                              --node-count=3 \\
+                              --zones=${AWS_REGION}a \\
+                              --topology=private \\
+                              --networking=calico \\
+                              --yes
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Validate Cluster') {
+            steps {
+                sh """
+                    kops validate cluster \\
+                      --name=${CLUSTER_NAME} \\
+                      --state=${env.KOPS_STATE_STORE} \\
+                      --wait 15m
+                """
+            }
+        }
+
+        stage('Export kubeconfig to Jenkins') {
+            steps {
+                sh """
+                    mkdir -p /var/lib/jenkins/.kube
+
+                    kops export kubecfg \\
+                      --name=${CLUSTER_NAME} \\
+                      --state=${env.KOPS_STATE_STORE} \\
+                      --admin
+
+                    echo "kubeconfig written to /var/lib/jenkins/.kube/config"
+                    kubectl get nodes
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Infrastructure and cluster are ready. kubeconfig available for application pipelines."
+        }
+        failure {
+            echo "Pipeline failed. Check logs above."
+        }
+        always {
+            cleanWs()
+        }
+    }
+}

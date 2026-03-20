@@ -1,0 +1,17 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+tfplan
+
+#config
+/config/id_rsa_devops
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
