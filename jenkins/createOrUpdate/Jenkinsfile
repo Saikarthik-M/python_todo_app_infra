@@ -163,7 +163,7 @@ pipeline {
                     kops validate cluster \
                       --name=${CLUSTER_NAME} \
                       --state=${env.KOPS_STATE_STORE} \
-                      --wait=10m
+                      --wait=15m
                 """
             }
         }
