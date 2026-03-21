@@ -2,10 +2,11 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION   = 'ap-south-1a'
-        CLUSTER_NAME = 'mypythonapp.k8s.local'
-        TF_DIR       = 'terraform'
-        KUBECONFIG   = '/var/lib/jenkins/.kube/config'
+        AWS_DEFAULT_REGION = 'ap-south-1'
+        AWS_REGION         = 'ap-south-1'
+        CLUSTER_NAME       = 'mypythonapp.k8s.local'
+        TF_DIR             = 'terraform'
+        KUBECONFIG         = '/var/lib/jenkins/.kube/config'
     }
 
     stages {
@@ -98,7 +99,7 @@ pipeline {
                             --control-plane-size=t3.small \\
                             --node-size=t3.small \\
                             --node-count=2 \\
-                            --zones=${AWS_REGION} \\
+                            --zones=${AWS_REGION}a \\
                             --topology=private \\
                             --networking=calico \\
                             --yes
