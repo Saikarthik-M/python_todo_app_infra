@@ -98,7 +98,7 @@ pipeline {
                             --control-plane-size=t3.small \\
                             --node-size=t3.small \\
                             --node-count=2 \\
-                            --zones=${AWS_REGION}a \\
+                            --zones=${AWS_REGION} \\
                             --topology=private \\
                             --networking=calico \\
                             --yes
