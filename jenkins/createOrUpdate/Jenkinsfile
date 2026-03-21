@@ -152,17 +152,6 @@ pipeline {
             }
         }
 
-        stage('kOps — Validate Cluster') {
-            steps {
-                sh """
-                    kops validate cluster \
-                    --name=${CLUSTER_NAME} \
-                    --state=${env.KOPS_STATE_STORE} \
-                    --wait=10m
-                """
-            }
-        }
-
         stage('Export kubeconfig to Jenkins') {
             steps {
                 sh """
@@ -175,6 +164,17 @@ pipeline {
 
                     echo "kubeconfig written to /var/lib/jenkins/.kube/config"
                     kubectl get nodes
+                """
+            }
+        }
+
+        stage('kOps — Validate Cluster') {
+            steps {
+                sh """
+                    kops validate cluster \
+                    --name=${CLUSTER_NAME} \
+                    --state=${env.KOPS_STATE_STORE} \
+                    --wait=10m
                 """
             }
         }
