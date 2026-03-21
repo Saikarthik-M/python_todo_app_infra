@@ -32,3 +32,8 @@ variable "nat_key_name" {
   description = "Key Name for NAT SSH"
   type = string
 }
+
+variable "availability_zone" {
+  description = "Availability zone of region"
+  type = string
+}

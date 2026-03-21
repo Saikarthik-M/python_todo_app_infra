@@ -11,6 +11,7 @@ module "vpc" {
   nat_instance_type = "t3.small"
   nat_ami           = "ami-05d2d839d4f73aafb"
   nat_key_name = module.key_name.key_name
+  availability_zone = "ap-south-1a"
 }
 
 module "jenkins_sg" {
@@ -117,6 +118,7 @@ module "kops_s3" {
   source = "./modules/s3"
   versioning = "Enabled"
   bucket_name = "saikarthik-python-app-kops-state"
+  force_destroy = true
 }
 
 terraform {

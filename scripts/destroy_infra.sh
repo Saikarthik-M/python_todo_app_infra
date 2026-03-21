@@ -52,6 +52,32 @@ if [ "${SKIP_KOPS}" == "false" ]; then
 fi
 
 # ─────────────────────────────────────────────
+# Empty kOps State Bucket
+# ─────────────────────────────────────────────
+echo "Emptying kOps state bucket..."
+BUCKET_NAME=$(cd ${TF_DIR} && terraform output -raw kops_bucket_name)
+
+# Delete all objects
+aws s3 rm s3://${BUCKET_NAME} --recursive --region ${AWS_REGION}
+
+# Delete all versions and delete markers
+for VERSION_TYPE in Versions DeleteMarkers; do
+  OBJECTS=$(aws s3api list-object-versions \
+    --bucket ${BUCKET_NAME} \
+    --query "{Objects: ${VERSION_TYPE}[].{Key:Key,VersionId:VersionId}}" \
+    --output json 2>/dev/null)
+
+  if [ "$(echo $OBJECTS | jq '.Objects | length')" -gt "0" ]; then
+    aws s3api delete-objects \
+      --bucket ${BUCKET_NAME} \
+      --delete "$OBJECTS" \
+      --region ${AWS_REGION}
+  fi
+done
+
+echo "Bucket emptied successfully."
+
+# ─────────────────────────────────────────────
 # Terraform Destroy
 # ─────────────────────────────────────────────
 echo "Running Terraform destroy..."
