@@ -52,9 +52,15 @@ pipeline {
                         returnStdout: true
                     ).trim()
 
+                    env.UTILITY_SUBNETS = sh(
+                        script: "cd ${TF_DIR} && terraform output -json public_subnet_ids | jq -r '.[0]'",
+                        returnStdout: true
+                    ).trim()
+
                     echo "KOPS_STATE_STORE: ${env.KOPS_STATE_STORE}"
                     echo "VPC_ID: ${env.VPC_ID}"
                     echo "SUBNETS: ${env.SUBNETS}"
+                    echo "UTILITY_SUBNETS: ${env.UTILITY_SUBNETS}"
                 }
             }
         }
@@ -71,30 +77,31 @@ pipeline {
                         echo "Cluster exists — running update..."
                         sh """
                             kops update cluster \\
-                              --name=${CLUSTER_NAME} \\
-                              --state=${env.KOPS_STATE_STORE} \\
-                              --yes
+                            --name=${CLUSTER_NAME} \\
+                            --state=${env.KOPS_STATE_STORE} \\
+                            --yes
 
                             kops rolling-update cluster \\
-                              --name=${CLUSTER_NAME} \\
-                              --state=${env.KOPS_STATE_STORE} \\
-                              --yes
+                            --name=${CLUSTER_NAME} \\
+                            --state=${env.KOPS_STATE_STORE} \\
+                            --yes
                         """
                     } else {
                         echo "Cluster not found — creating..."
                         sh """
                             kops create cluster \\
-                              --name=${CLUSTER_NAME} \\
-                              --state=${env.KOPS_STATE_STORE} \\
-                              --vpc=${env.VPC_ID} \\
-                              --subnets=${env.SUBNETS} \\
-                              --master-size=t3.small \\
-                              --node-size=t3.small \\
-                              --node-count=3 \\
-                              --zones=${AWS_REGION}a \\
-                              --topology=private \\
-                              --networking=calico \\
-                              --yes
+                            --name=${CLUSTER_NAME} \\
+                            --state=${env.KOPS_STATE_STORE} \\
+                            --network-id=${env.VPC_ID} \\
+                            --subnets=${env.SUBNETS} \\
+                            --utility-subnets=${env.UTILITY_SUBNETS} \\
+                            --control-plane-size=t3.small \\
+                            --node-size=t3.small \\
+                            --node-count=2 \\
+                            --zones=${AWS_REGION}a \\
+                            --topology=private \\
+                            --networking=calico \\
+                            --yes
                         """
                     }
                 }

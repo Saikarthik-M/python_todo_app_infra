@@ -34,19 +34,8 @@ sudo apt install -y jenkins
 sudo systemctl enable jenkins
 sudo systemctl start jenkins
 
-wait_for_jenkins() {
-  echo "Waiting for Jenkins to start..."
-  until curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/login | grep -q "200"; do
-    sleep 10
-    echo "Still waiting for Jenkins..."
-  done
-  echo "Jenkins is up!"
-}
-
 # Wait for initial startup
-wait_for_jenkins
-sleep 30
-wait_for_jenkins
+sleep 60
 
 # Get the initial admin password
 JENKINS_PASSWORD=$(sudo cat /var/lib/jenkins/secrets/initialAdminPassword)

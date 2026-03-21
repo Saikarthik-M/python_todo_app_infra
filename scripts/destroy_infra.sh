@@ -2,7 +2,7 @@
 set -e
 
 AWS_REGION="ap-south-1"
-CLUSTER_NAME="mycluster.pythonapp.com"
+CLUSTER_NAME="mypythonapp.k8s.local"
 TF_DIR="terraform"
 
 # ─────────────────────────────────────────────
