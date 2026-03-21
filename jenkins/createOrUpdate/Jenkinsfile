@@ -48,7 +48,7 @@ pipeline {
                     ).trim()
 
                     env.SUBNETS = sh(
-                        script: "cd ${TF_DIR} && terraform output -raw private_subnet_ids",
+                        script: "cd ${TF_DIR} && terraform output -json private_subnet_ids | jq -r '.[0]'",
                         returnStdout: true
                     ).trim()
 
