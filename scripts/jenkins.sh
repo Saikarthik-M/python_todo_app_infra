@@ -34,10 +34,6 @@ sudo apt install -y jenkins
 sudo systemctl enable jenkins
 sudo systemctl start jenkins
 
-# ─────────────────────────────────────────────
-# Install Jenkins Plugins (AWS Secrets Manager)
-# ─────────────────────────────────────────────
-
 wait_for_jenkins() {
   echo "Waiting for Jenkins to start..."
   until curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/login | grep -q "200"; do
@@ -49,33 +45,11 @@ wait_for_jenkins() {
 
 # Wait for initial startup
 wait_for_jenkins
-
-# Download Jenkins CLI jar
-wget -q http://localhost:8080/jnlpJars/jenkins-cli.jar -O /tmp/jenkins-cli.jar
-
-# Get the initial admin password
-JENKINS_PASSWORD=$(sudo cat /var/lib/jenkins/secrets/initialAdminPassword)
-
-# Install AWS Secrets Manager plugin and its dependencies
-sudo java -jar /tmp/jenkins-cli.jar \
-  -s http://localhost:8080 \
-  -auth admin:$JENKINS_PASSWORD \
-  install-plugin \
-  aws-secrets-manager-credentials-provider \
-  credentials \
-  credentials-binding \
-  plain-credentials
-
-echo "Plugins installed — restarting Jenkins..."
-
-# Restart Jenkins
-sudo systemctl restart jenkins
-
-# Wait for Jenkins to come back up after restart
 sleep 30
 wait_for_jenkins
 
-echo "AWS Secrets Manager plugin installed successfully!"
+# Get the initial admin password
+JENKINS_PASSWORD=$(sudo cat /var/lib/jenkins/secrets/initialAdminPassword)
 
 # ─────────────────────────────────────────────
 # Docker

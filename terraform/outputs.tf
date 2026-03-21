@@ -1,5 +1,5 @@
 output "kops_bucket_name" {
-  value = module.kops_s3.bucket_name
+  value = module.kops_s3.bucket_id
 }
 
 output "vpc_id" {

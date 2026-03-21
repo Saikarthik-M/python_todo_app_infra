@@ -4,7 +4,7 @@
 *.tfstate.backup
 *.tfplan
 tfplan
-
+.terraform.lock.hcl
 #config
 /config/id_rsa_devops
 
