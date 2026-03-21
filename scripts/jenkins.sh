@@ -67,6 +67,15 @@ sudo usermod -aG docker $USER
 sudo usermod -aG docker jenkins
 
 # ─────────────────────────────────────────────
+# AWS CLI
+# ─────────────────────────────────────────────
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+unzip /tmp/awscliv2.zip -d /tmp
+sudo /tmp/aws/install
+rm -rf /tmp/awscliv2.zip /tmp/aws
+aws --version
+
+# ─────────────────────────────────────────────
 # kubectl
 # ─────────────────────────────────────────────
 curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.32/deb/Release.key | \
