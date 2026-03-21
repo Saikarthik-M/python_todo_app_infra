@@ -74,35 +74,42 @@ pipeline {
                         returnStdout: true
                     ).trim()
 
+                    env.CLUSTER_EXISTS = clusterExists  // store for later stages
+
                     if (clusterExists == 'yes') {
                         echo "Cluster exists — running update..."
                         sh """
-                            kops update cluster \\
-                            --name=${CLUSTER_NAME} \\
-                            --state=${env.KOPS_STATE_STORE} \\
-                            --yes
+                            kops update cluster \
+                              --name=${CLUSTER_NAME} \
+                              --state=${env.KOPS_STATE_STORE} \
+                              --yes
 
-                            kops rolling-update cluster \\
-                            --name=${CLUSTER_NAME} \\
-                            --state=${env.KOPS_STATE_STORE} \\
-                            --yes
+                            kops export kubecfg \
+                              --name=${CLUSTER_NAME} \
+                              --state=${env.KOPS_STATE_STORE} \
+                              --admin
                         """
                     } else {
                         echo "Cluster not found — creating..."
                         sh """
-                            kops create cluster \\
-                            --name=${CLUSTER_NAME} \\
-                            --state=${env.KOPS_STATE_STORE} \\
-                            --network-id=${env.VPC_ID} \\
-                            --subnets=${env.SUBNETS} \\
-                            --utility-subnets=${env.UTILITY_SUBNETS} \\
-                            --control-plane-size=t3.small \\
-                            --node-size=t3.small \\
-                            --node-count=2 \\
-                            --zones=${AWS_REGION}a \\
-                            --topology=private \\
-                            --networking=calico \\
-                            --yes
+                            kops create cluster \
+                              --name=${CLUSTER_NAME} \
+                              --state=${env.KOPS_STATE_STORE} \
+                              --network-id=${env.VPC_ID} \
+                              --subnets=${env.SUBNETS} \
+                              --utility-subnets=${env.UTILITY_SUBNETS} \
+                              --control-plane-size=t3.small \
+                              --node-size=t3.small \
+                              --node-count=2 \
+                              --zones=ap-south-1a \
+                              --topology=private \
+                              --networking=calico \
+                              --yes
+
+                            kops export kubecfg \
+                              --name=${CLUSTER_NAME} \
+                              --state=${env.KOPS_STATE_STORE} \
+                              --admin
                         """
                     }
                 }
@@ -112,26 +119,24 @@ pipeline {
         stage('Allow Jenkins to K8s API') {
             steps {
                 script {
-                    // Get Jenkins private IP
                     def jenkinsIp = sh(
                         script: """
                             TOKEN=\$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
-                            -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+                              -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
                             curl -s -H "X-aws-ec2-metadata-token: \$TOKEN" \
-                            http://169.254.169.254/latest/meta-data/local-ipv4
+                              http://169.254.169.254/latest/meta-data/local-ipv4
                         """,
                         returnStdout: true
                     ).trim()
 
-                    // Get kops API ELB security group ID
                     def apiElbSgId = sh(
                         script: """
                             aws ec2 describe-security-groups \
-                            --filters "Name=tag:KubernetesCluster,Values=${CLUSTER_NAME}" \
+                              --filters "Name=tag:KubernetesCluster,Values=${CLUSTER_NAME}" \
                                         "Name=group-name,Values=api-elb.${CLUSTER_NAME}" \
-                            --query "SecurityGroups[0].GroupId" \
-                            --output text \
-                            --region ${AWS_DEFAULT_REGION}
+                              --query "SecurityGroups[0].GroupId" \
+                              --output text \
+                              --region ${AWS_DEFAULT_REGION}
                         """,
                         returnStdout: true
                     ).trim()
@@ -139,32 +144,16 @@ pipeline {
                     echo "Jenkins IP: ${jenkinsIp}"
                     echo "API ELB SG: ${apiElbSgId}"
 
-                    // Add rule — ignore error if rule already exists
+                    // || true — prevents failure if rule already exists
                     sh """
                         aws ec2 authorize-security-group-ingress \
-                        --group-id ${apiElbSgId} \
-                        --protocol tcp \
-                        --port 443 \
-                        --cidr ${jenkinsIp}/32 \
-                        --region ${AWS_DEFAULT_REGION} || true
+                          --group-id ${apiElbSgId} \
+                          --protocol tcp \
+                          --port 443 \
+                          --cidr ${jenkinsIp}/32 \
+                          --region ${AWS_DEFAULT_REGION} || true
                     """
                 }
-            }
-        }
-
-        stage('Export kubeconfig to Jenkins') {
-            steps {
-                sh """
-                    mkdir -p /var/lib/jenkins/.kube
-
-                    kops export kubecfg \\
-                      --name=${CLUSTER_NAME} \\
-                      --state=${env.KOPS_STATE_STORE} \\
-                      --admin
-
-                    echo "kubeconfig written to /var/lib/jenkins/.kube/config"
-                    kubectl get nodes
-                """
             }
         }
 
@@ -172,12 +161,29 @@ pipeline {
             steps {
                 sh """
                     kops validate cluster \
-                    --name=${CLUSTER_NAME} \
-                    --state=${env.KOPS_STATE_STORE} \
-                    --wait=10m
+                      --name=${CLUSTER_NAME} \
+                      --state=${env.KOPS_STATE_STORE} \
+                      --wait=10m
                 """
             }
         }
+
+        stage('kOps — Rolling Update') {
+            // Only runs when cluster already existed (update path)
+            // Skipped on fresh cluster creation
+            when {
+                expression { env.CLUSTER_EXISTS == 'yes' }
+            }
+            steps {
+                sh """
+                    kops rolling-update cluster \
+                      --name=${CLUSTER_NAME} \
+                      --state=${env.KOPS_STATE_STORE} \
+                      --yes
+                """
+            }
+        }
+
     }
 
     post {
