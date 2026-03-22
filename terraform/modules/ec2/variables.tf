@@ -38,3 +38,9 @@ variable "iam_instance_profile" {
     type = string
     default = null
 }
+
+variable "volume_size" {
+  description = "Volume Size"
+  type = number
+  default = 8
+}

@@ -65,7 +65,8 @@ sudo apt install -y \
 
 sudo usermod -aG docker $USER
 sudo usermod -aG docker jenkins
-
+sudo systemctl restart jenkins
+newgrp docker
 # ─────────────────────────────────────────────
 # AWS CLI
 # ─────────────────────────────────────────────
@@ -99,6 +100,12 @@ curl -fsSL "https://github.com/kubernetes/kops/releases/download/${KOPS_VERSION}
 sudo install -m 0755 /tmp/kops /usr/local/bin/kops
 rm /tmp/kops
 kops version
+
+# ─────────────────────────────────────────────
+# Helm
+# ─────────────────────────────────────────────
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+helm version
 
 # ─────────────────────────────────────────────
 # Terraform

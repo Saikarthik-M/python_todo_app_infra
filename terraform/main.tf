@@ -101,6 +101,7 @@ module "jenkins_instance" {
   key_name      = module.key_name.key_name
   user_data = file("${path.module}/../scripts/jenkins.sh")
   iam_instance_profile = module.jenkins_role.instance_profile_name
+  volume_size = 50
 }
 
 module "bastion_host" {

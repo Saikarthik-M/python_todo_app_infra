@@ -167,7 +167,36 @@ pipeline {
                 """
             }
         }
+        stage('Install Nginx Ingress Controller') {
+            steps {
+                script {
+                    def ingressExists = sh(
+                        script: "kubectl get ns ingress-nginx > /dev/null 2>&1 && echo 'yes' || echo 'no'",
+                        returnStdout: true
+                    ).trim()
 
+                    if (ingressExists == 'yes') {
+                        echo "Nginx Ingress Controller already installed — skipping."
+                    } else {
+                        echo "Installing Nginx Ingress Controller..."
+                        sh """
+                            # Install via Helm with public subnet annotation
+                            helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+                            helm repo update
+
+                            helm install ingress-nginx ingress-nginx/ingress-nginx \
+                            --namespace ingress-nginx \
+                            --create-namespace \
+                            --set controller.service.type=LoadBalancer \
+                            --set controller.service.annotations."service\\.beta\\.kubernetes\\.io/aws-load-balancer-subnets"="${env.UTILITY_SUBNETS}" \
+                            --set controller.service.annotations."service\\.beta\\.kubernetes\\.io/aws-load-balancer-scheme"="internet-facing" \
+                            --wait \
+                            --timeout=120s
+                        """
+                    }
+                }
+            }
+        }   
         stage('kOps — Rolling Update') {
             // Only runs when cluster already existed (update path)
             // Skipped on fresh cluster creation
