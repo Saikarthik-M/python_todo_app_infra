@@ -13,54 +13,122 @@ cd ${TF_DIR}
 terraform init -reconfigure
 
 KOPS_STATE_STORE="s3://$(terraform output -raw kops_bucket_name)"
+BUCKET_NAME=$(terraform output -raw kops_bucket_name)
+VPC_ID=$(terraform output -raw vpc_id)
 echo "KOPS_STATE_STORE: ${KOPS_STATE_STORE}"
+echo "VPC_ID: ${VPC_ID}"
 
 cd ..
 
 # ─────────────────────────────────────────────
-# Verify kOps Cluster Exists
+# kOps Delete Cluster
 # ─────────────────────────────────────────────
 echo "Checking if kOps cluster exists..."
 if kops get cluster --name=${CLUSTER_NAME} --state=${KOPS_STATE_STORE} > /dev/null 2>&1; then
-  SKIP_KOPS="false"
-  echo "Cluster found — will delete."
+    echo "Cluster found — deleting..."
+    kops delete cluster \
+      --name=${CLUSTER_NAME} \
+      --state=${KOPS_STATE_STORE} \
+      --yes
 else
-  SKIP_KOPS="true"
-  echo "Cluster not found — skipping kOps delete."
+    echo "Cluster not found — skipping kOps delete."
 fi
 
 # ─────────────────────────────────────────────
-# kOps Delete Cluster
+# Wait for kOps Instances to Terminate
 # ─────────────────────────────────────────────
-if [ "${SKIP_KOPS}" == "false" ]; then
-  echo "Deleting kOps cluster..."
-  kops delete cluster \
-    --name=${CLUSTER_NAME} \
-    --state=${KOPS_STATE_STORE} \
-    --yes
+echo "Waiting for kOps instances to terminate..."
+MAX_WAIT=300  # 5 minutes max
+ELAPSED=0
+while true; do
+    RUNNING=$(aws ec2 describe-instances \
+      --filters "Name=tag:KubernetesCluster,Values=${CLUSTER_NAME}" \
+                "Name=instance-state-name,Values=running,pending,stopping" \
+      --query "Reservations[*].Instances[*].InstanceId" \
+      --output text \
+      --region ${AWS_REGION})
 
-  # ─────────────────────────────────────────────
-  # Verify kOps Resources Gone
-  # ─────────────────────────────────────────────
-  echo "Verifying kOps resources are gone..."
-  aws ec2 describe-instances \
-    --region=${AWS_REGION} \
-    --filters "Name=tag:KubernetesCluster,Values=${CLUSTER_NAME}" \
-              "Name=instance-state-name,Values=running,pending,stopping" \
-    --query 'Reservations[].Instances[].InstanceId' \
-    --output text
-fi
+    if [ -z "$RUNNING" ]; then
+        echo "All kOps instances terminated ✅"
+        break
+    fi
+
+    if [ $ELAPSED -ge $MAX_WAIT ]; then
+        echo "Timeout — force terminating remaining instances..."
+        echo $RUNNING | tr '\t' '\n' | \
+          xargs -I {} aws ec2 terminate-instances \
+          --instance-ids {} --region ${AWS_REGION}
+        aws ec2 wait instance-terminated \
+          --instance-ids $(echo $RUNNING | tr '\t' ' ') \
+          --region ${AWS_REGION}
+        break
+    fi
+
+    echo "Still waiting for instances... (${ELAPSED}s elapsed)"
+    sleep 15
+    ELAPSED=$((ELAPSED + 15))
+done
+
+# ─────────────────────────────────────────────
+# Delete Leftover ELBs (Nginx Ingress + API ELB)
+# ─────────────────────────────────────────────
+echo "Deleting leftover ELBs..."
+
+# Classic ELBs
+aws elb describe-load-balancers \
+  --region ${AWS_REGION} \
+  --query "LoadBalancerDescriptions[*].LoadBalancerName" \
+  --output text | tr '\t' '\n' | \
+  xargs -I {} aws elb delete-load-balancer \
+  --load-balancer-name {} --region ${AWS_REGION} 2>/dev/null || true
+
+# ALB/NLB ELBs
+aws elbv2 describe-load-balancers \
+  --region ${AWS_REGION} \
+  --query "LoadBalancers[*].LoadBalancerArn" \
+  --output text | tr '\t' '\n' | \
+  xargs -I {} aws elbv2 delete-load-balancer \
+  --load-balancer-arn {} --region ${AWS_REGION} 2>/dev/null || true
+
+echo "Waiting for ELBs to be fully deleted..."
+sleep 30
+
+# ─────────────────────────────────────────────
+# Delete Leftover Security Groups
+# ─────────────────────────────────────────────
+echo "Deleting leftover kOps Security Groups..."
+aws ec2 describe-security-groups \
+  --filters "Name=tag:KubernetesCluster,Values=${CLUSTER_NAME}" \
+  --query "SecurityGroups[*].GroupId" \
+  --output text \
+  --region ${AWS_REGION} | tr '\t' '\n' | \
+  xargs -I {} aws ec2 delete-security-group \
+  --group-id {} --region ${AWS_REGION} 2>/dev/null || true
+
+sleep 10
+
+# ─────────────────────────────────────────────
+# Delete Leftover ENIs in VPC
+# ─────────────────────────────────────────────
+echo "Deleting leftover ENIs..."
+aws ec2 describe-network-interfaces \
+  --filters "Name=vpc-id,Values=${VPC_ID}" \
+            "Name=status,Values=available" \
+  --query "NetworkInterfaces[*].NetworkInterfaceId" \
+  --output text \
+  --region ${AWS_REGION} | tr '\t' '\n' | \
+  xargs -I {} aws ec2 delete-network-interface \
+  --network-interface-id {} --region ${AWS_REGION} 2>/dev/null || true
+
+sleep 10
 
 # ─────────────────────────────────────────────
 # Empty kOps State Bucket
 # ─────────────────────────────────────────────
 echo "Emptying kOps state bucket..."
-BUCKET_NAME=$(cd ${TF_DIR} && terraform output -raw kops_bucket_name)
 
-# Delete all objects
 aws s3 rm s3://${BUCKET_NAME} --recursive --region ${AWS_REGION}
 
-# Delete all versions and delete markers
 for VERSION_TYPE in Versions DeleteMarkers; do
   OBJECTS=$(aws s3api list-object-versions \
     --bucket ${BUCKET_NAME} \
@@ -85,4 +153,4 @@ cd ${TF_DIR}
 terraform init -reconfigure
 terraform destroy -auto-approve
 
-echo "All infrastructure destroyed successfully."
+echo "✅ All infrastructure destroyed successfully."
