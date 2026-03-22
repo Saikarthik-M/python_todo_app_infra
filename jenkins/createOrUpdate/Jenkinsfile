@@ -197,6 +197,53 @@ pipeline {
                 }
             }
         }   
+        stage('Install External Secrets Operator') {
+            steps {
+                script {
+                    def esoExists = sh(
+                        script: "helm list -n external-secrets | grep external-secrets > /dev/null 2>&1 && echo 'yes' || echo 'no'",
+                        returnStdout: true
+                    ).trim()
+
+                    if (esoExists == 'yes') {
+                        echo "ESO already installed — skipping."
+                    } else {
+                        echo "Installing External Secrets Operator..."
+                        sh """
+                            helm repo add external-secrets https://charts.external-secrets.io
+                            helm repo update
+                            helm install external-secrets external-secrets/external-secrets \
+                            --namespace external-secrets \
+                            --create-namespace \
+                            --set webhook.create=false \
+                            --set certController.create=false \
+                            --wait \
+                            --timeout=120s
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Update IMDS Hop Limit') {
+            steps {
+                sh """
+                    aws ec2 describe-instances \
+                    --filters "Name=tag:KubernetesCluster,Values=${CLUSTER_NAME}" \
+                                "Name=instance-state-name,Values=running" \
+                    --query "Reservations[*].Instances[*].InstanceId" \
+                    --output text \
+                    --region ${AWS_DEFAULT_REGION} | tr '\\t' '\\n' | \
+                    xargs -I {} aws ec2 modify-instance-metadata-options \
+                    --instance-id {} \
+                    --http-put-response-hop-limit 2 \
+                    --http-endpoint enabled \
+                    --region ${AWS_DEFAULT_REGION}
+
+                    echo "Hop limit updated"
+                """
+            }
+        }
         stage('kOps — Rolling Update') {
             // Only runs when cluster already existed (update path)
             // Skipped on fresh cluster creation
