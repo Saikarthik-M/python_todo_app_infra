@@ -14,11 +14,11 @@ jobs:
 
     steps:
 
-    # 🔹 Checkout
+    #  Checkout
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # 🔹 AWS Credentials
+    #  AWS Credentials
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
@@ -26,26 +26,26 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
         aws-region: ${{ env.AWS_REGION }}
 
-    # 🔹 Setup Terraform
+    #  Setup Terraform
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
 
-    # 🔹 Terraform Init
+    #  Terraform Init
     - name: Terraform Init
       run: terraform init -reconfigure
       working-directory: ${{ env.TF_DIR }}
 
-    # 🔹 Terraform Validate
+    #  Terraform Validate
     - name: Terraform Validate
       run: terraform validate
       working-directory: ${{ env.TF_DIR }}
 
-    # 🔹 Terraform Apply
+    #  Terraform Apply
     - name: Terraform Apply
       run: terraform apply -auto-approve
       working-directory: ${{ env.TF_DIR }}
 
-    # 🔹 Get Terraform Outputs
+    #  Get Terraform Outputs
     - name: Get Terraform Outputs
       run: |
         echo "KOPS_STATE_STORE=s3://$(terraform output -raw kops_bucket_name)" >> $GITHUB_ENV
@@ -54,7 +54,7 @@ jobs:
         echo "UTILITY_SUBNETS=$(terraform output -json public_subnet_ids | jq -r '.[0]')" >> $GITHUB_ENV
       working-directory: ${{ env.TF_DIR }}
 
-    # 🔹 Install tools
+    #  Install tools
     - name: Install Tools (kops + yq)
       run: |
         sudo apt-get update
@@ -69,23 +69,21 @@ jobs:
         sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
         sudo chmod +x /usr/local/bin/yq
 
-    # 🔹 Setup kubectl
+    #  Setup kubectl
     - name: Setup kubectl
       uses: azure/setup-kubectl@v4
 
-    # 🔹 Setup Helm
+    #  Setup Helm
     - name: Setup Helm
       uses: azure/setup-helm@v4
 
-    # 🔹 Create or Update Cluster
+    #  Create or Update Cluster
     - name: Create or Update Cluster
       run: |
         if kops get cluster --name=$CLUSTER_NAME --state=$KOPS_STATE_STORE > /dev/null 2>&1; then
           echo "Cluster exists — updating..."
-          echo "CLUSTER_EXISTS=yes" >> $GITHUB_ENV
         else
-          echo "Cluster not found — creating..."
-          echo "CLUSTER_EXISTS=no" >> $GITHUB_ENV
+          echo "Creating cluster..."
 
           kops create cluster \
             --name=$CLUSTER_NAME \
@@ -102,18 +100,17 @@ jobs:
             --api-loadbalancer-type=public
         fi
 
-    #  Configure IAM + IMDS (CRITICAL)
+    #  Configure IAM + IMDS
     - name: Configure Cluster (IAM + IMDS)
       run: |
         kops get cluster $CLUSTER_NAME -o yaml --state=$KOPS_STATE_STORE > cluster.yaml
 
         yq -i '.spec.iam.allowContainerRegistry = true' cluster.yaml
-        yq -i '.spec.iam.externalPolicies.node += ["arn:aws:iam::aws:policy/SecretsManagerReadWrite"]' cluster.yaml
         yq -i '.spec.instanceMetadata.httpPutResponseHopLimit = 2' cluster.yaml
 
         kops replace -f cluster.yaml --state=$KOPS_STATE_STORE
 
-    # 🔹 Apply cluster
+    #  Apply cluster
     - name: Apply Cluster
       run: |
         kops update cluster \
@@ -126,27 +123,39 @@ jobs:
           --state=$KOPS_STATE_STORE \
           --admin
 
-    #  Rolling update (VERY IMPORTANT)
-    - name: Rolling Update (Apply IAM changes)
+    #  Attach IAM policy (CRITICAL FIX)
+    - name: Attach Secrets Manager Policy to Nodes
+      run: |
+        ROLE_NAME=$(aws iam list-roles \
+          --query "Roles[?contains(RoleName, 'nodes.${CLUSTER_NAME}')].RoleName" \
+          --output text)
+
+        echo "Node Role: $ROLE_NAME"
+
+        aws iam attach-role-policy \
+          --role-name $ROLE_NAME \
+          --policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite
+
+    #  Rolling update (apply IAM)
+    - name: Rolling Update
       run: |
         kops rolling-update cluster \
           --name=$CLUSTER_NAME \
           --state=$KOPS_STATE_STORE \
           --yes
 
-        echo "Waiting for nodes to become Ready..."
+        echo "Waiting for nodes..."
 
         for i in {1..10}; do
           READY=$(kubectl get nodes --no-headers | grep -c " Ready" || true)
           if [ "$READY" -ge 3 ]; then
-            echo "All nodes ready"
+            echo "Nodes ready"
             break
           fi
-          echo "Waiting for nodes..."
           sleep 30
         done
 
-    # 🔹 Validate Cluster
+    #  Validate cluster
     - name: Validate Cluster
       run: |
         for i in {1..5}; do
@@ -154,11 +163,10 @@ jobs:
             --name=$CLUSTER_NAME \
             --state=$KOPS_STATE_STORE \
             --wait=5m && break
-          echo "Retrying validation..."
           sleep 60
         done
 
-    # 🔹 Install Envoy Gateway
+    #  Install Envoy Gateway
     - name: Install Envoy Gateway
       run: |
         helm upgrade --install eg oci://docker.io/envoyproxy/gateway-helm \
@@ -166,7 +174,7 @@ jobs:
           -n envoy-gateway-system \
           --create-namespace
 
-    # 🔹 Install External Secrets Operator
+    #  Install External Secrets Operator
     - name: Install External Secrets Operator
       run: |
         helm repo add external-secrets https://charts.external-secrets.io
@@ -178,7 +186,7 @@ jobs:
           --wait \
           --timeout=120s
 
-    #  Restart ESO pods (IMPORTANT)
+    #  Restart ESO pods
     - name: Restart External Secrets Pods
       run: |
         kubectl delete pod -n external-secrets --all || true
@@ -194,10 +202,9 @@ jobs:
             exit 0
           fi
 
-          echo "Waiting for secret to sync..."
+          echo "Waiting for secret..."
           sleep 20
         done
 
-        echo "Secret sync failed"
         kubectl describe externalsecret db-credentials -n default
         exit 1
