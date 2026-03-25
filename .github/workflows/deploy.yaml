@@ -1,0 +1,161 @@
+name: Infrastructure Setup
+
+on:
+  workflow_dispatch:   # manual trigger (recommended for infra)
+
+env:
+  AWS_REGION: ap-south-1
+  CLUSTER_NAME: mypythonapp.k8s.local
+  TF_DIR: terraform
+
+jobs:
+  infra:
+    runs-on: ubuntu-latest
+
+    steps:
+
+    #  Checkout
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    #  Configure AWS Credentials
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    #  Install Terraform
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+
+    #  Terraform Init
+    - name: Terraform Init
+      run: terraform init -reconfigure
+      working-directory: ${{ env.TF_DIR }}
+
+    #  Terraform Validate
+    - name: Terraform Validate
+      run: terraform validate
+      working-directory: ${{ env.TF_DIR }}
+
+    #  Terraform Apply
+    - name: Terraform Apply
+      run: terraform apply -auto-approve
+      working-directory: ${{ env.TF_DIR }}
+
+    #  Get Terraform Outputs
+    - name: Get Terraform Outputs
+      id: tf_outputs
+      run: |
+        echo "KOPS_STATE_STORE=s3://$(terraform output -raw kops_bucket_name)" >> $GITHUB_ENV
+        echo "VPC_ID=$(terraform output -raw vpc_id)" >> $GITHUB_ENV
+        echo "SUBNETS=$(terraform output -json private_subnet_ids | jq -r '.[0]')" >> $GITHUB_ENV
+        echo "UTILITY_SUBNETS=$(terraform output -json public_subnet_ids | jq -r '.[0]')" >> $GITHUB_ENV
+      working-directory: ${{ env.TF_DIR }}
+
+    #  Install kops
+    - name: Install kops
+      run: |
+        curl -Lo kops https://github.com/kubernetes/kops/releases/latest/download/kops-linux-amd64
+        chmod +x kops
+        sudo mv kops /usr/local/bin/
+
+    #  Create or Update Cluster
+    - name: Create or Update Cluster
+      id: kops
+      run: |
+        if kops get cluster --name=$CLUSTER_NAME --state=$KOPS_STATE_STORE > /dev/null 2>&1; then
+          echo "Cluster exists — updating..."
+          echo "CLUSTER_EXISTS=yes" >> $GITHUB_ENV
+
+          kops update cluster \
+            --name=$CLUSTER_NAME \
+            --state=$KOPS_STATE_STORE \
+            --yes
+
+          kops export kubecfg \
+            --name=$CLUSTER_NAME \
+            --state=$KOPS_STATE_STORE \
+            --admin
+        else
+          echo "Cluster not found — creating..."
+          echo "CLUSTER_EXISTS=no" >> $GITHUB_ENV
+
+          kops create cluster \
+            --name=$CLUSTER_NAME \
+            --state=$KOPS_STATE_STORE \
+            --network-id=$VPC_ID \
+            --subnets=$SUBNETS \
+            --utility-subnets=$UTILITY_SUBNETS \
+            --control-plane-size=t3.small \
+            --node-size=t3.small \
+            --node-count=2 \
+            --zones=ap-south-1a \
+            --topology=private \
+            --networking=calico \
+            --yes
+
+          kops export kubecfg \
+            --name=$CLUSTER_NAME \
+            --state=$KOPS_STATE_STORE \
+            --admin
+        fi
+
+    #  Install kubectl
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v4
+
+    #  Validate Cluster
+    - name: Validate Cluster
+      run: |
+        kops validate cluster \
+          --name=$CLUSTER_NAME \
+          --state=$KOPS_STATE_STORE \
+          --wait=20m
+
+    - name: Setup Helm
+      uses: azure/setup-helm@v4
+      
+    #  Install External Secrets Operator
+    - name: Install External Secrets Operator
+      run: |
+        helm repo add external-secrets https://charts.external-secrets.io
+        helm repo update
+
+        if helm list -n external-secrets | grep external-secrets > /dev/null 2>&1; then
+          echo "ESO already installed"
+        else
+          helm install external-secrets external-secrets/external-secrets \
+            --namespace external-secrets \
+            --create-namespace \
+            --set webhook.create=false \
+            --set certController.create=false \
+            --wait \
+            --timeout=120s
+        fi
+
+    #  Update IMDS Hop Limit
+    - name: Update IMDS Hop Limit
+      run: |
+        aws ec2 describe-instances \
+        --filters "Name=tag:KubernetesCluster,Values=$CLUSTER_NAME" \
+                  "Name=instance-state-name,Values=running" \
+        --query "Reservations[*].Instances[*].InstanceId" \
+        --output text \
+        --region $AWS_REGION | tr '\t' '\n' | \
+        xargs -I {} aws ec2 modify-instance-metadata-options \
+        --instance-id {} \
+        --http-put-response-hop-limit 2 \
+        --http-endpoint enabled \
+        --region $AWS_REGION
+
+    #  Rolling Update (only if cluster existed)
+    - name: Rolling Update
+      if: env.CLUSTER_EXISTS == 'yes'
+      run: |
+        kops rolling-update cluster \
+          --name=$CLUSTER_NAME \
+          --state=$KOPS_STATE_STORE \
+          --yes

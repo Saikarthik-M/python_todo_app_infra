@@ -14,30 +14,30 @@ module "vpc" {
   availability_zone = "ap-south-1a"
 }
 
-module "jenkins_sg" {
-  source = "./modules/sg"
-  name   = "jenkins_sg"
-  ingress = [{
-    from_port       = 8080
-    to_port         = 8080
-    protocol        = "TCP"
-    security_groups = [module.bastion_host_sg.sg_id]
-    },
-    {
-      from_port       = 22
-      to_port         = 22
-      protocol        = "TCP"
-      security_groups = [module.bastion_host_sg.sg_id]
-  }]
-  egress = [{
-    cidr_blocks = ["0.0.0.0/0"]
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    }
-  ]
-  vpc_id = module.vpc.vpc_id
-}
+# module "jenkins_sg" {
+#   source = "./modules/sg"
+#   name   = "jenkins_sg"
+#   ingress = [{
+#     from_port       = 8080
+#     to_port         = 8080
+#     protocol        = "TCP"
+#     security_groups = [module.bastion_host_sg.sg_id]
+#     },
+#     {
+#       from_port       = 22
+#       to_port         = 22
+#       protocol        = "TCP"
+#       security_groups = [module.bastion_host_sg.sg_id]
+#   }]
+#   egress = [{
+#     cidr_blocks = ["0.0.0.0/0"]
+#     from_port   = 0
+#     to_port     = 0
+#     protocol    = "-1"
+#     }
+#   ]
+#   vpc_id = module.vpc.vpc_id
+# }
 
 module "bastion_host_sg" {
   source = "./modules/sg"
@@ -63,46 +63,46 @@ module "key_name" {
   public_key = file("${path.module}/../config/id_rsa_devops.pub")
 }
 
-module "jenkins_role" {
-  source = "./modules/iam"
+# module "jenkins_role" {
+#   source = "./modules/iam"
 
-  name = "jenkins-role"
+#   name = "jenkins-role"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect    = "Allow"
-        Principal = { Service = "ec2.amazonaws.com" }
-        Action    = "sts:AssumeRole"
-      }
-    ]
-  })
+#   assume_role_policy = jsonencode({
+#     Version = "2012-10-17"
+#     Statement = [
+#       {
+#         Effect    = "Allow"
+#         Principal = { Service = "ec2.amazonaws.com" }
+#         Action    = "sts:AssumeRole"
+#       }
+#     ]
+#   })
 
-  policy_arns = [
-      "arn:aws:iam::aws:policy/SecretsManagerReadWrite",
-      "arn:aws:iam::aws:policy/IAMFullAccess",          
-      "arn:aws:iam::aws:policy/AmazonEC2FullAccess",    
-      "arn:aws:iam::aws:policy/AmazonS3FullAccess",
-      "arn:aws:iam::aws:policy/CloudWatchEventsFullAccess",
-      "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
-  ]
-}
+#   policy_arns = [
+#       "arn:aws:iam::aws:policy/SecretsManagerReadWrite",
+#       "arn:aws:iam::aws:policy/IAMFullAccess",          
+#       "arn:aws:iam::aws:policy/AmazonEC2FullAccess",    
+#       "arn:aws:iam::aws:policy/AmazonS3FullAccess",
+#       "arn:aws:iam::aws:policy/CloudWatchEventsFullAccess",
+#       "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
+#   ]
+# }
 
 
 
-module "jenkins_instance" {
-  source        = "./modules/ec2"
-  instance_type = "t3.small"
-  ami           = "ami-05d2d839d4f73aafb"
-  name          = "jenkins_instance"
-  subnet_id     = module.vpc.private_subnet_ids[0]
-  sg_ids        = [module.jenkins_sg.sg_id]
-  key_name      = module.key_name.key_name
-  user_data = file("${path.module}/../scripts/jenkins.sh")
-  iam_instance_profile = module.jenkins_role.instance_profile_name
-  volume_size = 50
-}
+# module "jenkins_instance" {
+#   source        = "./modules/ec2"
+#   instance_type = "t3.small"
+#   ami           = "ami-05d2d839d4f73aafb"
+#   name          = "jenkins_instance"
+#   subnet_id     = module.vpc.private_subnet_ids[0]
+#   sg_ids        = [module.jenkins_sg.sg_id]
+#   key_name      = module.key_name.key_name
+#   user_data = file("${path.module}/../scripts/jenkins.sh")
+#   iam_instance_profile = module.jenkins_role.instance_profile_name
+#   volume_size = 50
+# }
 
 module "bastion_host" {
   source                      = "./modules/ec2"
