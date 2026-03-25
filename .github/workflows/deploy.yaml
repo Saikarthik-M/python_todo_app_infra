@@ -102,7 +102,7 @@ jobs:
             --api-loadbalancer-type=public
         fi
 
-    # 🔥 Configure IAM + IMDS (CRITICAL)
+    #  Configure IAM + IMDS (CRITICAL)
     - name: Configure Cluster (IAM + IMDS)
       run: |
         kops get cluster $CLUSTER_NAME -o yaml --state=$KOPS_STATE_STORE > cluster.yaml
@@ -126,7 +126,7 @@ jobs:
           --state=$KOPS_STATE_STORE \
           --admin
 
-    # 🔥 Rolling update (VERY IMPORTANT)
+    #  Rolling update (VERY IMPORTANT)
     - name: Rolling Update (Apply IAM changes)
       run: |
         kops rolling-update cluster \
@@ -178,12 +178,12 @@ jobs:
           --wait \
           --timeout=120s
 
-    # 🔥 Restart ESO pods (IMPORTANT)
+    #  Restart ESO pods (IMPORTANT)
     - name: Restart External Secrets Pods
       run: |
         kubectl delete pod -n external-secrets --all || true
 
-    # 🔥 Wait for External Secret
+    #  Wait for External Secret
     - name: Wait for External Secret
       run: |
         for i in {1..10}; do
