@@ -150,7 +150,7 @@ jobs:
     # 🔹 Install Envoy Gateway
     - name: Install Envoy Gateway
       run: |
-        helm install eg oci://docker.io/envoyproxy/gateway-helm \
+        helm upgrade --install eg oci://docker.io/envoyproxy/gateway-helm \
           --version v1.0.0 \
           -n envoy-gateway-system \
           --create-namespace || true
@@ -164,7 +164,7 @@ jobs:
         if helm list -n external-secrets | grep external-secrets > /dev/null 2>&1; then
           echo "ESO already installed"
         else
-          helm install external-secrets external-secrets/external-secrets \
+          helm upgrade --install external-secrets external-secrets/external-secrets \
             --namespace external-secrets \
             --create-namespace \
             --wait \
